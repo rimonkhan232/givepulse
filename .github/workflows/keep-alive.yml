@@ -1,0 +1,28 @@
+name: Keep Supabase database active
+
+# Supabase's free tier pauses a project after 7 days with no real database
+# activity. This job hits our backend's /api/health endpoint (which runs an
+# actual "SELECT 1" query, not just a network ping) twice a week -- comfortably
+# inside that 7-day window -- so the database, and your data, never pauses.
+#
+# Setup (one-time): after deploying the backend to Render, go to this repo's
+# Settings -> Secrets and variables -> Actions -> New repository secret,
+# name it BACKEND_URL, and set it to your Render URL,
+# e.g. https://givepulse.onrender.com  (no trailing slash).
+
+on:
+  schedule:
+    - cron: "0 6 * * 1,4" # every Monday and Thursday at 06:00 UTC
+  workflow_dispatch: {} # lets you also trigger it manually from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health endpoint
+        run: |
+          if [ -z "${{ secrets.BACKEND_URL }}" ]; then
+            echo "BACKEND_URL secret is not set yet -- add it in Settings > Secrets and variables > Actions, then re-run this workflow."
+            exit 0
+          fi
+          curl -fsS "${{ secrets.BACKEND_URL }}/api/health" && echo "" && echo "Keep-alive ping succeeded."
