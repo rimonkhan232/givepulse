@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { get, all, run } from "../db/connection.js";
 import { requireAuth } from "../middleware/auth.js";
+import { isValidNid } from "../data/validNids.js";
 
 const router = Router();
 
@@ -16,6 +17,8 @@ function serialize(row) {
     address: row.address,
     phone: row.phone,
     nid: row.nid,
+    nidVerified: Boolean(row.nid_verified),
+    hasNidPhoto: Boolean(row.nid_photo_data),
     wants: row.wants,
     lastDonationDate: row.last_donation_date,
     about: row.about,
@@ -51,6 +54,22 @@ router.get("/me", requireAuth, async (req, res) => {
   res.json({ donor: serialize(row) });
 });
 
+// Check a NID number against the demo "valid NID" dataset before the user
+// even saves their profile, so the form can show valid/not-valid live.
+// Public (no auth) so it can be checked as someone types, same as any
+// other lightweight lookup.
+router.get("/nid-check/:nid", async (req, res) => {
+  res.json({ valid: isValidNid(req.params.nid) });
+});
+
+// The uploaded NID card photo is only ever returned to its own owner --
+// never included in the public directory or another user's view.
+router.get("/me/nid-photo", requireAuth, async (req, res) => {
+  const row = await get("SELECT nid_photo_data, nid_photo_mime FROM donor_profiles WHERE user_id = ?", [req.userId]);
+  if (!row?.nid_photo_data) return res.status(404).json({ error: "No NID photo uploaded." });
+  res.json({ data: row.nid_photo_data, mime: row.nid_photo_mime });
+});
+
 router.put("/me", requireAuth, async (req, res) => {
   const existing = await get("SELECT * FROM donor_profiles WHERE user_id = ?", [req.userId]);
   if (!existing) return res.status(404).json({ error: "Profile not found." });
@@ -68,8 +87,11 @@ router.put("/me", requireAuth, async (req, res) => {
     }
   }
 
+  const nid = b.nid ?? existing.nid;
+  const nidVerified = isValidNid(nid) ? 1 : 0;
+
   await run(
-    `UPDATE donor_profiles SET full_name=?, blood_group=?, division=?, address=?, phone=?, nid=?, wants=?, last_donation_date=?, about=?, available=?
+    `UPDATE donor_profiles SET full_name=?, blood_group=?, division=?, address=?, phone=?, nid=?, nid_verified=?, nid_photo_data=?, nid_photo_mime=?, wants=?, last_donation_date=?, about=?, available=?
      WHERE user_id = ?`,
     [
       b.fullName ?? existing.full_name,
@@ -77,7 +99,10 @@ router.put("/me", requireAuth, async (req, res) => {
       b.division ?? existing.division,
       b.address ?? existing.address,
       b.phone ?? existing.phone,
-      b.nid ?? existing.nid,
+      nid,
+      nidVerified,
+      b.nidPhotoData ?? existing.nid_photo_data,
+      b.nidPhotoMime ?? existing.nid_photo_mime,
       b.wants ?? existing.wants,
       b.lastDonationDate ?? existing.last_donation_date,
       b.about ?? existing.about,

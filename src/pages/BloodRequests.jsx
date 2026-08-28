@@ -8,12 +8,14 @@ import { useAuth } from "../context/AuthContext";
 import BloodGroupBadge from "../components/BloodGroupBadge";
 import PulseMark from "../components/PulseMark";
 import { useLanguage } from "../context/LanguageContext";
+import { getDetectedDivision } from "../lib/geo";
 
 export default function BloodRequests() {
   const { t } = useLanguage();
   const { user } = useAuth();
   const [tab, setTab] = useState("nearMe"); // 'nearMe' | 'all'
   const [myDivision, setMyDivision] = useState("");
+  const [usingGeoDivision, setUsingGeoDivision] = useState(false);
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [hasReports, setHasReports] = useState(true);
@@ -38,7 +40,16 @@ export default function BloodRequests() {
       ]);
       setRequests(rows);
       setHasReports(reports.length > 0);
-      setMyDivision(donor?.division || "");
+      // Prefer a GPS-detected division (from the dashboard's "share your
+      // location" popup) over the one typed into the profile, if we have
+      // one -- it reflects where the person actually is right now.
+      const geo = getDetectedDivision();
+      if (geo?.division) {
+        setMyDivision(geo.division);
+        setUsingGeoDivision(true);
+      } else {
+        setMyDivision(donor?.division || "");
+      }
       setLoading(false);
     })();
   }, []);
@@ -77,7 +88,14 @@ export default function BloodRequests() {
       <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-display font-bold text-crimson-950">{t("requests")}</h1>
-          <p className="text-sm text-crimson-900/50 mt-1">{visibleRequests.length} request(s){tab === "nearMe" && myDivision ? ` in ${myDivision}` : ""}</p>
+          <p className="text-sm text-crimson-900/50 mt-1">
+            {visibleRequests.length} request(s){tab === "nearMe" && myDivision ? ` in ${myDivision}` : ""}
+            {tab === "nearMe" && myDivision && usingGeoDivision && (
+              <span className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-bold text-crimson-700 bg-crimson-50 px-1.5 py-0.5 rounded-full align-middle">
+                <LocateFixed size={9} /> via GPS
+              </span>
+            )}
+          </p>
         </div>
         {hasReports ? (
           <button

@@ -56,6 +56,8 @@ export const api = {
     me: () => request("/donors/me"),
     updateMe: (payload) => request("/donors/me", { method: "PUT", body: payload }),
     get: (id) => request(`/donors/${id}`, { auth: false }),
+    checkNid: (nid) => request(`/donors/nid-check/${encodeURIComponent(nid)}`, { auth: false }),
+    myNidPhoto: () => request("/donors/me/nid-photo"),
   },
   bloodBanks: {
     list: (params = {}) => {

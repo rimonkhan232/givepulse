@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle, Save, User as UserIcon, CheckCircle2, ArrowRight, Hash, Pencil, IdCard,
+  Loader2, XCircle, Upload, ShieldCheck,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -18,10 +19,23 @@ const emptyForm = {
   phone: "",
   address: "",
   nid: "",
+  nidPhotoData: "",
+  nidPhotoMime: "",
   wants: "both",
   lastDonationDate: "",
   about: "",
 };
+
+// Reads a File into a base64 data URL, the same way test-report and
+// complaint-proof uploads already work elsewhere in the app.
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function Profile() {
   const { user } = useAuth();
@@ -37,6 +51,9 @@ export default function Profile() {
   const [status, setStatus] = useState("idle"); // idle | saving | error
   const [errorMessage, setErrorMessage] = useState("");
   const [justSaved, setJustSaved] = useState(false);
+  const [nidStatus, setNidStatus] = useState("idle"); // idle | checking | valid | invalid
+  const [nidVerified, setNidVerified] = useState(false); // last-saved verification state
+  const [nidPhotoPreview, setNidPhotoPreview] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -51,11 +68,18 @@ export default function Profile() {
             phone: donor.phone || "",
             address: donor.address || "",
             nid: donor.nid || "",
+            nidPhotoData: "",
+            nidPhotoMime: "",
             wants: donor.wants || "both",
             lastDonationDate: donor.lastDonationDate || "",
             about: donor.about || "",
           };
           setForm(loaded);
+          setNidVerified(Boolean(donor.nidVerified));
+          if (donor.nid) setNidStatus(donor.nidVerified ? "valid" : "invalid");
+          if (donor.hasNidPhoto) {
+            api.donors.myNidPhoto().then(({ data }) => setNidPhotoPreview(data)).catch(() => {});
+          }
           // If the profile is already complete and we're not in the
           // mandatory onboarding flow, land on the read-only view instead
           // of dropping the person straight into an edit form.
@@ -71,6 +95,27 @@ export default function Profile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const checkNid = async (value) => {
+    const trimmed = (value || "").trim();
+    if (!trimmed) { setNidStatus("idle"); return; }
+    setNidStatus("checking");
+    try {
+      const { valid } = await api.donors.checkNid(trimmed);
+      setNidStatus(valid ? "valid" : "invalid");
+      setNidVerified(valid);
+    } catch {
+      setNidStatus("idle");
+    }
+  };
+
+  const handleNidPhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const dataUrl = await readFileAsDataUrl(file);
+    setForm((f) => ({ ...f, nidPhotoData: dataUrl, nidPhotoMime: file.type }));
+    setNidPhotoPreview(dataUrl);
+  };
+
   const { eligible, daysLeft } = eligibleToDonate(form.lastDonationDate);
 
   const handleSave = async (e) => {
@@ -78,9 +123,18 @@ export default function Profile() {
     setStatus("saving");
     setErrorMessage("");
     try {
-      const { donor } = await api.donors.updateMe(form);
+      // Only send a new NID photo if one was picked this session -- an
+      // empty string here would otherwise overwrite a previously saved
+      // photo when the user edits other fields without re-uploading it.
+      const payload = { ...form };
+      if (!payload.nidPhotoData) {
+        delete payload.nidPhotoData;
+        delete payload.nidPhotoMime;
+      }
+      const { donor } = await api.donors.updateMe(payload);
       setStatus("idle");
       setSaved(form);
+      setNidVerified(Boolean(donor?.nidVerified));
 
       if (onboarding && isProfileComplete(donor)) {
         // Step 1 done -- move straight on to the mandatory report step.
@@ -194,7 +248,6 @@ export default function Profile() {
               ["Division", saved.division],
               ["Phone Number", saved.phone],
               ["Address", saved.address],
-              ["National ID (NID)", saved.nid],
               ["I want to", saved.wants === "both" ? "Donate & Find Blood" : saved.wants === "donate" ? "Donate Blood" : "Find Blood"],
               ["Last Donation Date", saved.lastDonationDate ? formatDate(saved.lastDonationDate) : "No record"],
             ].map(([label, value]) => (
@@ -203,6 +256,29 @@ export default function Profile() {
                 <dd className="text-crimson-950 font-medium text-right">{value || "—"}</dd>
               </div>
             ))}
+            <div className="flex justify-between py-2.5 gap-4">
+              <dt className="text-crimson-900/50 shrink-0">National ID (NID)</dt>
+              <dd className="text-crimson-950 font-medium text-right flex items-center gap-1.5 justify-end">
+                {saved.nid || "—"}
+                {saved.nid && (
+                  nidVerified ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                      <ShieldCheck size={10} /> Verified
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">
+                      <XCircle size={10} /> Not verified
+                    </span>
+                  )
+                )}
+              </dd>
+            </div>
+            {nidPhotoPreview && (
+              <div className="py-2.5">
+                <dt className="text-crimson-900/50 mb-1.5">NID Card Photo</dt>
+                <img src={nidPhotoPreview} alt="Uploaded NID" className="w-full max-w-[220px] rounded-lg border border-crimson-100" />
+              </div>
+            )}
             {saved.about && (
               <div className="py-2.5">
                 <dt className="text-crimson-900/50 mb-1">About Me</dt>
@@ -278,16 +354,53 @@ export default function Profile() {
             <label className="text-sm font-semibold text-crimson-950 flex items-center gap-1.5">
               <IdCard size={14} /> National ID (NID) Number <span className="text-red-500">*</span>
             </label>
-            <input
-              required
-              value={form.nid}
-              onChange={set("nid")}
-              placeholder="e.g. 1234567890123"
-              className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-crimson-200 text-sm focus-ring"
-            />
+            <div className="relative mt-1.5">
+              <input
+                required
+                value={form.nid}
+                onChange={(e) => { set("nid")(e); setNidStatus("idle"); }}
+                onBlur={(e) => checkNid(e.target.value)}
+                placeholder="e.g. 1234567890123"
+                className="w-full px-3 py-2.5 pr-9 rounded-xl border border-crimson-200 text-sm focus-ring"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                {nidStatus === "checking" && <Loader2 size={16} className="animate-spin text-crimson-400" />}
+                {nidStatus === "valid" && <ShieldCheck size={16} className="text-emerald-600" />}
+                {nidStatus === "invalid" && <XCircle size={16} className="text-red-500" />}
+              </span>
+            </div>
+            {nidStatus === "valid" && (
+              <p className="text-xs text-emerald-600 font-semibold mt-1.5 flex items-center gap-1">
+                <ShieldCheck size={12} /> NID verified against the national database.
+              </p>
+            )}
+            {nidStatus === "invalid" && (
+              <p className="text-xs text-red-500 font-semibold mt-1.5 flex items-center gap-1">
+                <XCircle size={12} /> This NID number wasn't found — double-check the digits.
+              </p>
+            )}
             <p className="text-xs text-crimson-900/40 mt-1.5">
               Used to verify your identity and, if ever needed, to act on a confirmed complaint. Never shown to other users.
             </p>
+
+            <div className="mt-3">
+              <label className="text-xs font-semibold text-crimson-900/60 flex items-center gap-1.5 mb-1.5">
+                <Upload size={12} /> NID Card Photo (optional)
+              </label>
+              {nidPhotoPreview && (
+                <img
+                  src={nidPhotoPreview}
+                  alt="Uploaded NID"
+                  className="w-full max-w-[220px] rounded-lg border border-crimson-100 mb-2 object-cover"
+                />
+              )}
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={handleNidPhotoChange}
+                className="text-xs text-crimson-900/60 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-crimson-50 file:text-crimson-700 file:text-xs file:font-semibold hover:file:bg-crimson-100"
+              />
+            </div>
           </div>
 
           <div>

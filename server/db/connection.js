@@ -211,6 +211,14 @@ export async function initDb() {
     ALTER TABLE blood_test_reports ADD COLUMN IF NOT EXISTS file_mime TEXT;
     ALTER TABLE complaints ADD COLUMN IF NOT EXISTS image_data TEXT;
     ALTER TABLE complaints ADD COLUMN IF NOT EXISTS image_mime TEXT;
+
+    -- NID verification: whether the submitted NID matched the demo "valid
+    -- NID" dataset (server/data/validNids.js), plus an optional uploaded
+    -- photo of the NID card itself, stored the same way report/complaint
+    -- files are (base64 in Postgres, not on disk).
+    ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS nid_verified INTEGER DEFAULT 0;
+    ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS nid_photo_data TEXT;
+    ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS nid_photo_mime TEXT;
   `);
 }
 

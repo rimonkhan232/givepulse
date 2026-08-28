@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import StatCard from "../components/StatCard";
 import BloodGroupBadge from "../components/BloodGroupBadge";
 import PulseMark from "../components/PulseMark";
+import LocationPrompt from "../components/LocationPrompt";
 import { eligibleToDonate, formatDate } from "../lib/bloodUtils";
 
 export default function Dashboard() {
@@ -54,6 +55,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
+      <LocationPrompt />
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
